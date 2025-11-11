@@ -6,7 +6,8 @@ const cheerio = require('cheerio');
 
 const app = express();
 const port = 8080;
-const db = new Database('database.db', { verbose: console.log });
+const dbPath = process.env.NODE_ENV === 'production' ? '/data/database.db' : 'database.db';
+const db = new Database(dbPath, { verbose: console.log });
 
 // Middleware
 app.use(cors());
