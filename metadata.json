@@ -1,0 +1,5 @@
+{
+  "name": "Price Tracker Pro",
+  "description": "A web application to track and compare product prices from your website against competitors. Users can input product data manually or by pasting from a spreadsheet, and the app simulates fetching the latest prices to highlight where competitors are cheaper.",
+  "requestFramePermissions": []
+}
