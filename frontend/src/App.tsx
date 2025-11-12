@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
-import { Product, ScraperType } from './types';
+import { Product, ScraperType, scraperTypeMap } from './types';
 import { fetchProductPrice, simulateFetchProductPrice, getProducts, addProduct as addProductService, deleteProduct as deleteProductService, updateProduct as updateProductService, checkBackendHealth } from './services/scraperService';
 import { Header } from './components/Header';
 import { ProductInput } from './components/ProductInput';
@@ -7,7 +7,45 @@ import { ProductTable } from './components/ProductTable';
 import { FilterPanel, FilterOptions } from './components/FilterPanel';
 import { EditProductModal } from './components/EditProductModal';
 import { Pagination } from './components/Pagination';
+import { Footer } from './components/Footer';
 import { v4 as uuidv4 } from 'uuid';
+
+// Helper function to map string to valid ScraperType
+const getValidScraperType = (input: string): ScraperType => {
+  const normalized = input.toLowerCase().trim();
+  
+  // Check if it's already a valid key
+  if (Object.keys(scraperTypeMap).includes(normalized)) {
+    return normalized as ScraperType;
+  }
+  
+  // Try to match by value (display name)
+  const matchedKey = Object.entries(scraperTypeMap).find(
+    ([, value]) => value.toLowerCase() === normalized
+  )?.[0];
+  
+  if (matchedKey) {
+    return matchedKey as ScraperType;
+  }
+  
+  // Default to generic if no match
+  console.warn(`Unknown scraper type: "${input}", using "generic" as default`);
+  return 'generic';
+};
+
+// Helper function to check if product is duplicate based on key fields
+const isDuplicateProduct = (
+  product1: Omit<Product, 'instanceId' | 'price' | 'lastChecked' | 'status' | 'isSimulated'>,
+  product2: Omit<Product, 'instanceId' | 'price' | 'lastChecked' | 'status' | 'isSimulated'>
+): boolean => {
+  return (
+    product1.productId.toLowerCase() === product2.productId.toLowerCase() &&
+    product1.name.toLowerCase() === product2.name.toLowerCase() &&
+    product1.url.toLowerCase() === product2.url.toLowerCase() &&
+    product1.website.toLowerCase() === product2.website.toLowerCase() &&
+    product1.scraperType === product2.scraperType
+  );
+};
 
 function App() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -82,20 +120,60 @@ function App() {
   const addProductsFromPaste = async (pastedText: string) => {
     const rows = pastedText.trim().split('\n');
     
-    // Sử dụng for...of để xử lý tuần tự, tránh race condition
+    // Parse all rows into products array
+    const productsToAdd: (Omit<Product, 'instanceId' | 'price' | 'lastChecked' | 'status' | 'isSimulated'> & { category?: string; brand?: string })[] = [];
+    const skippedDuplicates: string[] = [];
+    
     for (const row of rows) {
-      const parts = row.split(',').map(item => item.trim());
+      // Hỗ trợ cả tab-separated (từ sheet) và comma-separated
+      let parts: string[] = [];
+      if (row.includes('\t')) {
+        // Tab-separated (từ Google Sheet, Excel)
+        parts = row.split('\t').map(item => item.trim());
+      } else {
+        // Comma-separated
+        parts = row.split(',').map(item => item.trim());
+      }
+      
       if (parts.length >= 4) {
         const [productId, name, url, website] = parts;
         let scraperType: ScraperType = 'generic';
         if (parts[4] && parts[4].length > 0) {
-          scraperType = parts[4] as ScraperType;
+          scraperType = getValidScraperType(parts[4]);
         }
         let category = parts[5] && parts[5].length > 0 ? parts[5] : undefined;
         let brand = parts[6] && parts[6].length > 0 ? parts[6] : undefined;
         
-        await addProduct({ productId, name, url, website, scraperType, category, brand });
+        const newProduct = { productId, name, url, website, scraperType, category, brand };
+        
+        // Check if duplicate with existing products or already in current batch
+        const isDuplicate = 
+          products.some(p => isDuplicateProduct(newProduct, p)) ||
+          productsToAdd.some(p => isDuplicateProduct(newProduct, p));
+        
+        if (isDuplicate) {
+          skippedDuplicates.push(`${productId} - ${name}`);
+        } else {
+          productsToAdd.push(newProduct);
+        }
       }
+    }
+    
+    // Add non-duplicate products sequentially
+    for (const product of productsToAdd) {
+      await addProduct(product);
+    }
+    
+    // Show feedback
+    if (productsToAdd.length > 0 || skippedDuplicates.length > 0) {
+      let message = `Added ${productsToAdd.length} product(s)`;
+      if (skippedDuplicates.length > 0) {
+        message += `, skipped ${skippedDuplicates.length} duplicate(s)`;
+        if (skippedDuplicates.length <= 5) {
+          message += `: ${skippedDuplicates.join(', ')}`;
+        }
+      }
+      alert(message);
     }
   };
 
@@ -237,6 +315,7 @@ function App() {
           />
         )}
       </main>
+      <Footer />
     </div>
   );
 }
