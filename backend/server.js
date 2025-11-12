@@ -112,6 +112,25 @@ app.post('/scrape', async (req, res) => {
                 // FPT Shop có thể dùng nhiều class khác nhau, thử cả hai
                 priceText = $('.price-product').first().text() || $('.text-black-opacity-100.h4-bold').first().text();
                 break;
+            case 'quang_hanh':
+                priceText = $('.prPrice.change-pr').first().text();
+                break;
+            case 'techzhome':
+                priceText = $('.price_info.price_config').first().text();
+                break;
+            case 'vietnamrobotics':
+                priceText = $('.discount.bk-product-price').first().text();
+                break;
+            case 'meta':
+                priceText = $('.p-price').first().text();
+                break;
+            case 'miworld':
+                priceText = $('.price_current.bk-product-price').first().text();
+                break;
+            case 'gia_khang':
+                // Thử cả hai cách vì class name có thể chứa dấu chấm
+                priceText = $('[class*="price-de-xuat"]').first().text() || $('div[class=".price-de-xuat"]').first().text();
+                break;
             case 'generic':
             default:
                 // Thử tìm các thẻ meta tag phổ biến
