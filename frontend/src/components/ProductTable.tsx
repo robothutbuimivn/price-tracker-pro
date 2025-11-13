@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Product, scraperTypeMap } from '../types';
 
 interface ProductTableProps {
@@ -6,6 +6,11 @@ interface ProductTableProps {
   onCheckPrice: (instanceId: string) => void;
   onDeleteProduct: (instanceId: string) => void;
   onEditProduct: (product: Product) => void;
+}
+
+interface ColumnVisibility {
+  category: boolean;
+  brand: boolean;
 }
 
 const LoadingSpinner: React.FC = () => (
@@ -74,6 +79,18 @@ const StatusIndicator: React.FC<{ product: Product; allProducts: Product[] }> = 
 };
 
 export const ProductTable: React.FC<ProductTableProps> = ({ products, onCheckPrice, onDeleteProduct, onEditProduct }) => {
+    const [columnVisibility, setColumnVisibility] = useState<ColumnVisibility>({
+        category: true,
+        brand: true,
+    });
+
+    const toggleColumnVisibility = (column: keyof ColumnVisibility) => {
+        setColumnVisibility(prev => ({
+            ...prev,
+            [column]: !prev[column],
+        }));
+    };
+
     if (products.length === 0) {
         return <p className="text-center text-muted py-8">Chưa có sản phẩm nào. Hãy thêm sản phẩm để bắt đầu theo dõi.</p>
     }
@@ -83,8 +100,40 @@ export const ProductTable: React.FC<ProductTableProps> = ({ products, onCheckPri
             <thead className="bg-primary">
                 <tr>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider">Product</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider">Category</th>
-                    <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider">Brand</th>
+                    {columnVisibility.category && (
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider">
+                            <div className="flex items-center justify-between">
+                                <span>Category</span>
+                                <button
+                                    onClick={() => toggleColumnVisibility('category')}
+                                    className="ml-2 p-1 text-muted hover:text-white transition-colors"
+                                    title="Hide column"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                        <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                                        <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </th>
+                    )}
+                    {columnVisibility.brand && (
+                        <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider">
+                            <div className="flex items-center justify-between">
+                                <span>Brand</span>
+                                <button
+                                    onClick={() => toggleColumnVisibility('brand')}
+                                    className="ml-2 p-1 text-muted hover:text-white transition-colors"
+                                    title="Hide column"
+                                >
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                                        <path d="M10 12a2 2 0 100-4 2 2 0 000 4z" />
+                                        <path fillRule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clipRule="evenodd" />
+                                    </svg>
+                                </button>
+                            </div>
+                        </th>
+                    )}
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider">Website</th>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider">Current Price</th>
                     <th scope="col" className="px-6 py-3 text-left text-xs font-medium text-muted uppercase tracking-wider">Status</th>
@@ -99,15 +148,31 @@ export const ProductTable: React.FC<ProductTableProps> = ({ products, onCheckPri
                             <div className="text-sm font-medium text-white">{product.name}</div>
                             <div className="text-sm text-muted">{product.productId}</div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                            {product.category || <span className="text-muted italic">-</span>}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
-                            {product.brand || <span className="text-muted italic">-</span>}
-                        </td>
+                        {columnVisibility.category && (
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                                {product.category || <span className="text-muted italic">-</span>}
+                            </td>
+                        )}
+                        {columnVisibility.brand && (
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                                {product.brand || <span className="text-muted italic">-</span>}
+                            </td>
+                        )}
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
                            <div className="flex items-center">
-                                {product.website}
+                                <a 
+                                    href={product.url} 
+                                    target="_blank" 
+                                    rel="noopener noreferrer"
+                                    className="text-accent hover:text-blue-300 underline flex items-center"
+                                    title="Open product link"
+                                >
+                                    {product.website}
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 ml-1" viewBox="0 0 20 20" fill="currentColor">
+                                        <path d="M11 3a1 1 0 100 2h3.586L9.293 9.293a1 1 0 001.414 1.414L16 6.414V10a1 1 0 102 0V4a1 1 0 00-1-1h-6z" />
+                                        <path d="M5 5a2 2 0 00-2 2v8a2 2 0 002 2h8a2 2 0 002-2v-3a1 1 0 10-2 0v3H5V7h3a1 1 0 000-2H5z" />
+                                    </svg>
+                                </a>
                                 {product.website === 'MyStore' && (
                                     <span className="ml-2 text-xs font-semibold bg-accent text-white px-2 py-0.5 rounded-full">
                                         My Store
