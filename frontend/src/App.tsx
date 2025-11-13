@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect, useMemo } from 'react';
 import { Product, ScraperType, scraperTypeMap } from './types';
-import { fetchProductPrice, simulateFetchProductPrice, getProducts, addProduct as addProductService, deleteProduct as deleteProductService, updateProduct as updateProductService, checkBackendHealth } from './services/scraperService';
+import { fetchProductPrice, simulateFetchProductPrice, getProducts, addProduct as addProductService, deleteProduct as deleteProductService, updateProduct as updateProductService, checkBackendHealth, savePriceHistory } from './services/scraperService';
 import { Header } from './components/Header';
 import { ProductInput } from './components/ProductInput';
 import { ProductTable } from './components/ProductTable';
@@ -8,6 +8,7 @@ import { FilterPanel, FilterOptions } from './components/FilterPanel';
 import { EditProductModal } from './components/EditProductModal';
 import { Pagination } from './components/Pagination';
 import { Footer } from './components/Footer';
+import { PriceHistoryViewer } from './components/PriceHistoryViewer';
 import { v4 as uuidv4 } from 'uuid';
 
 // Helper function to map string to valid ScraperType
@@ -47,6 +48,41 @@ const isDuplicateProduct = (
   );
 };
 
+// LocalStorage utility functions for price cache
+const PRICE_CACHE_KEY = 'priceTrackerCache';
+
+interface PriceCache {
+  [instanceId: string]: {
+    price: number;
+    lastChecked: string;
+  };
+}
+
+const getPriceCache = (): PriceCache => {
+  try {
+    const cache = localStorage.getItem(PRICE_CACHE_KEY);
+    return cache ? JSON.parse(cache) : {};
+  } catch (error) {
+    console.error('Error reading price cache:', error);
+    return {};
+  }
+};
+
+const savePriceToCache = (instanceId: string, price: number, lastChecked: string): void => {
+  try {
+    const cache = getPriceCache();
+    cache[instanceId] = { price, lastChecked };
+    localStorage.setItem(PRICE_CACHE_KEY, JSON.stringify(cache));
+  } catch (error) {
+    console.error('Error saving price cache:', error);
+  }
+};
+
+const getCachedPrice = (instanceId: string): { price: number; lastChecked: string } | null => {
+  const cache = getPriceCache();
+  return cache[instanceId] || null;
+};
+
 function App() {
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -59,6 +95,7 @@ function App() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
+  const [activeTab, setActiveTab] = useState<'comparison' | 'history'>('comparison');
 
   // Lấy danh sách sản phẩm từ backend khi component được mount
   useEffect(() => {
@@ -70,14 +107,21 @@ function App() {
         
         const fetchedProducts = await getProducts();
         console.log("Products fetched:", fetchedProducts);
+        
+        // Lấy cache giá từ localStorage
+        const priceCache = getPriceCache();
+        
         // Chuyển đổi dữ liệu từ DB (không có status, price...) sang state của frontend
-        const initialisedProducts = fetchedProducts.map(p => ({
+        const initialisedProducts = fetchedProducts.map(p => {
+          const cached = priceCache[p.instanceId];
+          return {
             ...p,
-            price: null,
-            lastChecked: null,
-            status: 'idle' as const,
+            price: cached ? cached.price : null,
+            lastChecked: cached ? cached.lastChecked : null,
+            status: cached ? 'checked' as const : 'idle' as const,
             isSimulated: false,
-        }));
+          };
+        });
         setProducts(initialisedProducts);
       } catch (error) {
         console.error("Failed to fetch products from backend:", error);
@@ -220,17 +264,36 @@ function App() {
         (async () => {
             try {
                 const newPrice = await fetchProductPrice(productToCheck.url, productToCheck.scraperType);
+                const lastCheckedTime = new Date().toISOString();
+                
+                // Lưu vào localStorage cache
+                savePriceToCache(instanceId, newPrice, lastCheckedTime);
+                
+                // Lưu vào price history (backend)
+                try {
+                  await savePriceHistory(instanceId, productToCheck.productId, productToCheck.website, newPrice);
+                  console.log('Price history saved successfully');
+                } catch (historyError) {
+                  console.error('Failed to save price history:', historyError);
+                  // Không throw error - vẫn update UI ngay cả khi history save fail
+                }
+                
                 setProducts(prev => prev.map(p => 
                     p.instanceId === instanceId 
-                    ? { ...p, price: newPrice, status: 'checked', lastChecked: new Date().toISOString(), isSimulated: false } 
+                    ? { ...p, price: newPrice, status: 'checked', lastChecked: lastCheckedTime, isSimulated: false } 
                     : p
                 ));
             } catch (error) {
                 console.error("Failed to fetch price for", productToCheck.url, error);
                 const simulatedPrice = simulateFetchProductPrice(productToCheck.url);
+                const lastCheckedTime = new Date().toISOString();
+                
+                // Lưu simulated price vào cache cũng được
+                savePriceToCache(instanceId, simulatedPrice, lastCheckedTime);
+                
                 setProducts(prev => prev.map(p => 
                     p.instanceId === instanceId 
-                    ? { ...p, price: simulatedPrice, status: 'error', lastChecked: new Date().toISOString(), isSimulated: true } 
+                    ? { ...p, price: simulatedPrice, status: 'error', lastChecked: lastCheckedTime, isSimulated: true } 
                     : p
                 ));
             }
@@ -285,41 +348,74 @@ function App() {
     <div className="min-h-screen bg-primary font-sans">
       <Header />
       <main className="container mx-auto p-4 md:p-8">
-        <ProductInput onAddProduct={addProduct} onAddFromPaste={addProductsFromPaste} />
-        {!isLoading && products.length > 0 && (
-          <FilterPanel products={products} filters={filters} onFilterChange={setFilters} />
-        )}
-        <div className="mt-8 bg-secondary border border-border rounded-lg shadow-xl p-4 md:p-6">
-          <div className="flex flex-col md:flex-row justify-between items-center mb-4">
-            <h2 className="text-2xl font-bold text-white mb-4 md:mb-0">Product Comparison</h2>
-            <button
-              onClick={checkAllPrices}
-              disabled={isLoading}
-              className="w-full md:w-auto bg-accent hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-500 disabled:cursor-not-allowed"
-            >
-              Check All Prices
-            </button>
-          </div>
-          {isLoading ? (
-             <p className="text-center text-muted py-8">Loading products from database...</p>
-          ) : (
-            <>
-              <ProductTable products={paginatedProducts} onCheckPrice={checkPrice} onDeleteProduct={deleteProduct} onEditProduct={openEditModal} />
-              {filteredProducts.length > 0 && (
-                <div className="mt-6">
-                  <Pagination
-                    currentPage={currentPage}
-                    totalPages={totalPages}
-                    itemsPerPage={itemsPerPage}
-                    onPageChange={setCurrentPage}
-                    onItemsPerPageChange={setItemsPerPage}
-                    totalItems={filteredProducts.length}
-                  />
+        {activeTab === 'comparison' ? (
+          <>
+            <ProductInput onAddProduct={addProduct} onAddFromPaste={addProductsFromPaste} />
+            {!isLoading && products.length > 0 && (
+              <FilterPanel products={products} filters={filters} onFilterChange={setFilters} />
+            )}
+            <div className="mt-8 bg-secondary border border-border rounded-lg shadow-xl p-4 md:p-6">
+              <div className="flex flex-col md:flex-row justify-between items-center mb-4">
+                <div className="flex flex-col md:flex-row gap-4 mb-4 md:mb-0">
+                  <h2 className="text-2xl font-bold text-white">Product Comparison</h2>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setActiveTab('comparison')}
+                      className="px-4 py-2 rounded-lg font-bold transition duration-300 bg-accent text-white"
+                    >
+                      Comparison
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('history')}
+                      className="px-4 py-2 rounded-lg font-bold transition duration-300 bg-gray-600 hover:bg-gray-700 text-white"
+                    >
+                      Price History
+                    </button>
+                  </div>
                 </div>
+                <button
+                  onClick={checkAllPrices}
+                  disabled={isLoading}
+                  className="w-full md:w-auto bg-accent hover:bg-blue-600 text-white font-bold py-2 px-4 rounded-lg transition duration-300 disabled:bg-gray-500 disabled:cursor-not-allowed"
+                >
+                  Check All Prices
+                </button>
+              </div>
+              {isLoading ? (
+                 <p className="text-center text-muted py-8">Loading products from database...</p>
+              ) : (
+                <>
+                  <ProductTable products={paginatedProducts} onCheckPrice={checkPrice} onDeleteProduct={deleteProduct} onEditProduct={openEditModal} />
+                  {filteredProducts.length > 0 && (
+                    <div className="mt-6">
+                      <Pagination
+                        currentPage={currentPage}
+                        totalPages={totalPages}
+                        itemsPerPage={itemsPerPage}
+                        onPageChange={setCurrentPage}
+                        onItemsPerPageChange={setItemsPerPage}
+                        totalItems={filteredProducts.length}
+                      />
+                    </div>
+                  )}
+                </>
               )}
-            </>
-          )}
-        </div>
+            </div>
+          </>
+        ) : (
+          <div className="relative">
+            <div className="fixed top-20 left-4 md:left-8 z-10">
+              <button
+                onClick={() => setActiveTab('comparison')}
+                className="px-4 py-2 rounded-lg font-bold transition duration-300 bg-gray-600 hover:bg-gray-700 text-white"
+              >
+                ← Back to Comparison
+              </button>
+            </div>
+            <PriceHistoryViewer products={products} />
+          </div>
+        )}
+
         {editingProduct && (
           <EditProductModal
             product={editingProduct}

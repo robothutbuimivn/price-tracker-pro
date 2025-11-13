@@ -2,6 +2,23 @@ import { ScraperType, ProductData } from "../types";
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
+// --- Price History Types ---
+
+export interface PriceHistory {
+  id: number;
+  instanceId: string;
+  productId: string;
+  website: string;
+  price: number;
+  date: string;
+  checkedAt: string;
+  name?: string;
+}
+
+export interface DailyPriceHistory extends PriceHistory {
+  dailyPrice?: number;
+}
+
 // --- Product Management API Calls ---
 
 export const getProducts = async (): Promise<ProductData[]> => {
@@ -108,9 +125,69 @@ export const checkBackendHealth = async (): Promise<boolean> => {
     }
 };
 
-/**
- * SIMULATED WEB SCRAPER (FALLBACK)
- */
+
+// --- Price History API Calls ---
+
+export const getPriceHistory = async (productId?: string, startDate?: string, endDate?: string): Promise<PriceHistory[]> => {
+    const params = new URLSearchParams();
+    if (productId) params.append('productId', productId);
+    if (startDate) params.append('startDate', startDate);
+    if (endDate) params.append('endDate', endDate);
+    
+    const query = params.toString();
+    const url = `${API_BASE_URL}/price-history${query ? '?' + query : ''}`;
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error('Failed to fetch price history');
+    }
+    return response.json();
+};
+
+export const getDailyPriceHistory = async (productId?: string, startDate?: string, endDate?: string): Promise<DailyPriceHistory[]> => {
+    const params = new URLSearchParams();
+    if (productId) params.append('productId', productId);
+    if (startDate) params.append('startDate', startDate);
+    if (endDate) params.append('endDate', endDate);
+    
+    const query = params.toString();
+    const url = `${API_BASE_URL}/price-history/daily${query ? '?' + query : ''}`;
+    
+    const response = await fetch(url);
+    if (!response.ok) {
+        throw new Error('Failed to fetch daily price history');
+    }
+    return response.json();
+};
+
+export const savePriceHistory = async (instanceId: string, productId: string, website: string, price: number): Promise<PriceHistory> => {
+    const response = await fetch(`${API_BASE_URL}/price-history`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ instanceId, productId, website, price }),
+    });
+    
+    if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to save price history');
+    }
+    return response.json();
+};
+
+export const deletePriceHistoryOld = async (days: number): Promise<void> => {
+    const response = await fetch(`${API_BASE_URL}/price-history/old/${days}`, {
+        method: 'DELETE',
+    });
+    
+    if (!response.ok) {
+        const errorData = await response.json();
+        throw new Error(errorData.error || 'Failed to delete old price history');
+    }
+};
+
+
 export const simulateFetchProductPrice = (url: string): number => {
     console.warn(`Backend connection failed. Using simulated price for ${url}`);
     

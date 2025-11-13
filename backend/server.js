@@ -5,12 +5,24 @@ const axios = require('axios');
 const cheerio = require('cheerio');
 
 const app = express();
-const port = 8080;
-const dbPath = process.env.NODE_ENV === 'production' ? '/data/database.db' : 'database.db';
-const db = new Database(dbPath, { verbose: console.log });
+const port = process.env.PORT || 8080;
+const dbPath = process.env.DATABASE_PATH || (process.env.NODE_ENV === 'production' ? '/data/database.db' : 'database.db');
+const nodeEnv = process.env.NODE_ENV || 'development';
+const db = new Database(dbPath, { verbose: nodeEnv === 'development' ? console.log : false });
+
+console.log(`[${new Date().toISOString()}] Starting server in ${nodeEnv} mode on port ${port}`);
+console.log(`[${new Date().toISOString()}] Database path: ${dbPath}`);
+
+// CORS configuration for production
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || '*',
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type']
+};
 
 // Middleware
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json());
 
 // Khởi tạo bảng trong DB nếu chưa tồn tại
@@ -27,6 +39,27 @@ const createTableStmt = db.prepare(`
   )
 `);
 createTableStmt.run();
+
+// Tạo bảng price_history để lưu lịch sử giá
+const createPriceHistoryTableStmt = db.prepare(`
+  CREATE TABLE IF NOT EXISTS price_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    instanceId TEXT NOT NULL,
+    productId TEXT NOT NULL,
+    website TEXT NOT NULL,
+    price REAL NOT NULL,
+    checkedDate DATE NOT NULL,
+    checkedAt DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (instanceId) REFERENCES products(instanceId) ON DELETE CASCADE
+  )
+`);
+createPriceHistoryTableStmt.run();
+
+// Tạo index cho query nhanh hơn
+const createIndexStmt = db.prepare(`
+  CREATE INDEX IF NOT EXISTS idx_price_history_product ON price_history(productId, checkedDate)
+`);
+createIndexStmt.run();
 
 // Kiểm tra và thêm các cột mới nếu chưa tồn tại
 const checkAndAddColumns = () => {
@@ -133,6 +166,154 @@ app.put('/products/:instanceId', (req, res) => {
 });
 
 
+// --- API Endpoints for Price History ---
+
+// Lấy lịch sử giá (có filter theo date range, productId)
+app.get('/price-history', (req, res) => {
+  try {
+    const { productId, startDate, endDate } = req.query;
+    
+    let query = `
+      SELECT 
+        ph.id, ph.instanceId, ph.productId, ph.website, ph.price, 
+        DATE(ph.checkedAt) as date,
+        ph.checkedAt,
+        p.name
+      FROM price_history ph
+      LEFT JOIN products p ON ph.instanceId = p.instanceId
+      WHERE 1=1
+    `;
+    const params = [];
+    
+    if (productId) {
+      query += ` AND ph.productId = ?`;
+      params.push(productId);
+    }
+    
+    if (startDate) {
+      query += ` AND DATE(ph.checkedAt) >= ?`;
+      params.push(startDate);
+    }
+    
+    if (endDate) {
+      query += ` AND DATE(ph.checkedAt) <= ?`;
+      params.push(endDate);
+    }
+    
+    query += ` ORDER BY ph.checkedAt DESC`;
+    
+    const stmt = db.prepare(query);
+    const history = stmt.all(...params);
+    res.json(history);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Lấy lịch sử giá theo ngày (lấy lần check cuối cùng mỗi ngày)
+app.get('/price-history/daily', (req, res) => {
+  try {
+    const { productId, startDate, endDate } = req.query;
+    console.log('GET /price-history/daily requested with:', { productId, startDate, endDate });
+    
+    // Use subquery để lấy record cuối cùng mỗi ngày/product/website
+    let query = `
+      SELECT 
+        ph.id, ph.instanceId, ph.productId, ph.website, ph.price, 
+        DATE(ph.checkedAt) as date,
+        ph.checkedAt,
+        p.name
+      FROM price_history ph
+      LEFT JOIN products p ON ph.instanceId = p.instanceId
+      WHERE ph.id IN (
+        SELECT MAX(id)
+        FROM price_history
+        WHERE 1=1
+    `;
+    const params = [];
+    
+    if (productId) {
+      query += ` AND productId = ?`;
+      params.push(productId);
+    }
+    
+    if (startDate) {
+      query += ` AND DATE(checkedAt) >= ?`;
+      params.push(startDate);
+    }
+    
+    if (endDate) {
+      query += ` AND DATE(checkedAt) <= ?`;
+      params.push(endDate);
+    }
+    
+    query += ` GROUP BY DATE(checkedAt), productId, website
+      )
+      ORDER BY ph.checkedAt DESC`;
+    
+    console.log('Query:', query);
+    console.log('Params:', params);
+    
+    const stmt = db.prepare(query);
+    const history = stmt.all(...params);
+    
+    console.log('Result count:', history.length);
+    console.log('Results:', history.slice(0, 3)); // Log first 3 records
+    
+    res.json(history);
+  } catch (err) {
+    console.error('Error fetching daily price history:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Lưu giá vào lịch sử
+app.post('/price-history', (req, res) => {
+  try {
+    const { instanceId, productId, website, price } = req.body;
+    
+    if (!instanceId || !productId || !website || price === undefined || price === null) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+    const stmt = db.prepare(`
+      INSERT INTO price_history (instanceId, productId, website, price, checkedDate, checkedAt) 
+      VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    `);
+    
+    const info = stmt.run(instanceId, productId, website, price, today);
+    console.log('Price history recorded:', { instanceId, productId, website, price, date: today });
+    res.status(201).json({ id: info.lastInsertRowid, instanceId, productId, website, price, date: today });
+  } catch (err) {
+    console.error('Error saving price history:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Xóa lịch sử giá cũ (tuỳ chọn - xóa data cũ hơn N ngày)
+app.delete('/price-history/old/:days', (req, res) => {
+  try {
+    const { days } = req.params;
+    const daysNum = parseInt(days, 10);
+    
+    if (isNaN(daysNum) || daysNum < 1) {
+      return res.status(400).json({ error: 'Days must be a positive number' });
+    }
+    
+    const stmt = db.prepare(`
+      DELETE FROM price_history 
+      WHERE checkedAt < datetime('now', '-' || ? || ' days')
+    `);
+    
+    const info = stmt.run(daysNum);
+    res.json({ message: `Deleted ${info.changes} old price history records` });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
 // --- API Endpoint for Scraping ---
 
 const parsePrice = (priceText) => {
@@ -224,5 +405,15 @@ app.post('/scrape', async (req, res) => {
 
 
 app.listen(port, () => {
-    console.log(`Backend server listening at http://localhost:${port}`);
+    console.log(`[${new Date().toISOString()}] Backend server listening at http://localhost:${port}`);
+    console.log(`[${new Date().toISOString()}] Environment: ${nodeEnv}`);
+    if (process.env.FRONTEND_URL) {
+        console.log(`[${new Date().toISOString()}] CORS enabled for: ${process.env.FRONTEND_URL}`);
+    }
+});
+
+process.on('SIGTERM', () => {
+    console.log('SIGTERM received, closing database connection...');
+    db.close();
+    process.exit(0);
 });
