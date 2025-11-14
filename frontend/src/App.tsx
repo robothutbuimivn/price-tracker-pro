@@ -3,6 +3,9 @@ import { Product, ScraperType, scraperTypeMap } from './types';
 import { fetchProductPrice, simulateFetchProductPrice, getProducts, addProduct as addProductService, deleteProduct as deleteProductService, updateProduct as updateProductService, checkBackendHealth, savePriceHistory } from './services/scraperService';
 import { Header } from './components/Header';
 import { Navigation } from './components/Navigation';
+import { LoginPage } from './components/LoginPage';
+import { AdminPanel } from './components/AdminPanel';
+import { UserAccountPage } from './components/UserAccountPage';
 import { ProductInput } from './components/ProductInput';
 import { ProductTable } from './components/ProductTable';
 import { ProductListTable } from './components/ProductListTable';
@@ -92,7 +95,22 @@ function App() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [itemsPerPage, setItemsPerPage] = useState(10);
-  const [activePage, setActivePage] = useState<'check-price' | 'add-product' | 'price-history'>('check-price');
+  const [activePage, setActivePage] = useState<'check-price' | 'add-product' | 'price-history' | 'account' | 'admin'>('check-price');
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [username, setUsername] = useState('');
+  const [role, setRole] = useState<'user' | 'admin'>('user');
+
+  // Kiểm tra token khi component mount
+  useEffect(() => {
+    const token = localStorage.getItem('token');
+    const storedUsername = localStorage.getItem('username');
+    const storedRole = localStorage.getItem('role') as 'user' | 'admin' | null;
+    if (token && storedUsername && storedRole) {
+      setIsLoggedIn(true);
+      setUsername(storedUsername);
+      setRole(storedRole);
+    }
+  }, []);
 
   // Lấy danh sách sản phẩm từ backend khi component được mount
   useEffect(() => {
@@ -341,10 +359,27 @@ function App() {
     return filteredProducts.slice(startIndex, endIndex);
   }, [filteredProducts, currentPage, itemsPerPage]);
 
+  const handleLoginSuccess = (_token: string, loggedInUsername: string, loggedInRole: string) => {
+    setIsLoggedIn(true);
+    setUsername(loggedInUsername);
+    setRole(loggedInRole as 'user' | 'admin');
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('username');
+    setIsLoggedIn(false);
+    setUsername('');
+  };
+
+  if (!isLoggedIn) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
+
   return (
     <div className="min-h-screen bg-primary font-sans">
-      <Header />
-      <Navigation activePage={activePage} onPageChange={setActivePage} />
+      <Header username={username} onLogout={handleLogout} />
+      <Navigation activePage={activePage} onPageChange={setActivePage} isAdmin={role === 'admin'} />
       <main className="container mx-auto p-4 md:p-8">
         {activePage === 'check-price' && (
           <>
@@ -407,6 +442,27 @@ function App() {
         {activePage === 'price-history' && (
           <>
             <PriceHistoryViewer products={products} />
+          </>
+        )}
+
+        {activePage === 'account' && (
+          <>
+            <UserAccountPage 
+              username={username}
+              role={role}
+              password={localStorage.getItem('adminPassword') || localStorage.getItem('userPassword') || ''}
+            />
+          </>
+        )}
+
+        {activePage === 'admin' && role === 'admin' && (
+          <>
+            <AdminPanel 
+              adminUsername={username} 
+              adminPassword={localStorage.getItem('adminPassword') || ''} 
+              currentUsername={username}
+              currentRole={role}
+            />
           </>
         )}
 

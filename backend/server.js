@@ -40,6 +40,37 @@ const createTableStmt = db.prepare(`
 `);
 createTableStmt.run();
 
+// Tạo bảng users
+const createUsersTableStmt = db.prepare(`
+  CREATE TABLE IF NOT EXISTS users (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    username TEXT UNIQUE NOT NULL,
+    password TEXT NOT NULL,
+    role TEXT DEFAULT 'user',
+    createdAt DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+createUsersTableStmt.run();
+
+// Kiểm tra và tạo tài khoản admin mặc định
+const checkAndCreateAdminUser = () => {
+  try {
+    const adminExists = db.prepare('SELECT id FROM users WHERE username = ?').get('admin');
+    if (!adminExists) {
+      const crypto = require('crypto');
+      const hashPassword = (pwd) => crypto.createHash('sha256').update(pwd).digest('hex');
+      const adminPassword = hashPassword('admin123');
+      
+      db.prepare('INSERT INTO users (username, password, role) VALUES (?, ?, ?)').run('admin', adminPassword, 'admin');
+      console.log('[Admin User] Created default admin account: admin / admin123');
+    }
+  } catch (err) {
+    console.error('Error creating admin user:', err.message);
+  }
+};
+
+checkAndCreateAdminUser();
+
 // Tạo bảng price_history để lưu lịch sử giá
 const createPriceHistoryTableStmt = db.prepare(`
   CREATE TABLE IF NOT EXISTS price_history (
@@ -91,6 +122,295 @@ checkAndAddColumns();
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Backend is running' });
+});
+
+// Reset users table (xóa tất cả users và tạo lại admin) - CHỈ DÙNG LẦN ĐẦU SETUP
+app.post('/admin/reset-users', (req, res) => {
+  try {
+    // Xóa tất cả dữ liệu trong bảng users
+    db.exec('DELETE FROM users');
+    
+    // Tạo lại tài khoản admin mặc định
+    const crypto = require('crypto');
+    const hashPassword = (pwd) => crypto.createHash('sha256').update(pwd).digest('hex');
+    const adminPassword = hashPassword('admin123');
+    
+    db.prepare('INSERT INTO users (username, password, role) VALUES (?, ?, ?)').run('admin', adminPassword, 'admin');
+    
+    res.json({ message: 'Users table reset successfully. Admin account recreated: admin / admin123' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- API Endpoints for Authentication ---
+
+// Đăng ký tài khoản (chỉ admin mới có thể tạo)
+app.post('/auth/register', (req, res) => {
+  try {
+    const { username, password, adminUsername, adminPassword } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password are required' });
+    }
+    
+    // Xác thực admin
+    const hashPassword = (pwd) => {
+      const crypto = require('crypto');
+      return crypto.createHash('sha256').update(pwd).digest('hex');
+    };
+    
+    const adminHashedPassword = hashPassword(adminPassword);
+    const adminUser = db.prepare('SELECT id, role FROM users WHERE username = ? AND password = ? AND role = ?').get(adminUsername, adminHashedPassword, 'admin');
+    
+    if (!adminUser) {
+      return res.status(403).json({ error: 'Only admin can create new accounts' });
+    }
+    
+    if (username.length < 3) {
+      return res.status(400).json({ error: 'Username must be at least 3 characters' });
+    }
+    
+    if (password.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+    
+    const hashedPassword = hashPassword(password);
+    
+    const stmt = db.prepare('INSERT INTO users (username, password, role) VALUES (?, ?, ?)');
+    const info = stmt.run(username, hashedPassword, 'user');
+    
+    res.status(201).json({ message: 'User created successfully', userId: info.lastInsertRowid });
+  } catch (err) {
+    if (err.message.includes('UNIQUE constraint failed')) {
+      return res.status(400).json({ error: 'Username already exists' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Lấy danh sách tất cả người dùng (chỉ admin)
+app.get('/auth/users', (req, res) => {
+  try {
+    const { adminUsername, adminPassword } = req.query;
+    
+    if (!adminUsername || !adminPassword) {
+      return res.status(401).json({ error: 'Admin credentials required' });
+    }
+    
+    const hashPassword = (pwd) => {
+      const crypto = require('crypto');
+      return crypto.createHash('sha256').update(pwd).digest('hex');
+    };
+    
+    const adminHashedPassword = hashPassword(adminPassword);
+    const adminUser = db.prepare('SELECT id, role FROM users WHERE username = ? AND password = ? AND role = ?').get(adminUsername, adminHashedPassword, 'admin');
+    
+    if (!adminUser) {
+      return res.status(403).json({ error: 'Only admin can view users' });
+    }
+    
+    const stmt = db.prepare('SELECT id, username, role, createdAt FROM users ORDER BY createdAt DESC');
+    const users = stmt.all();
+    res.json(users);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Xóa người dùng (chỉ admin)
+app.delete('/auth/users/:userId', (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { adminUsername, adminPassword } = req.body;
+    
+    if (!adminUsername || !adminPassword) {
+      return res.status(401).json({ error: 'Admin credentials required' });
+    }
+    
+    const hashPassword = (pwd) => {
+      const crypto = require('crypto');
+      return crypto.createHash('sha256').update(pwd).digest('hex');
+    };
+    
+    const adminHashedPassword = hashPassword(adminPassword);
+    const adminUser = db.prepare('SELECT id, role FROM users WHERE username = ? AND password = ? AND role = ?').get(adminUsername, adminHashedPassword, 'admin');
+    
+    if (!adminUser) {
+      return res.status(403).json({ error: 'Only admin can delete users' });
+    }
+    
+    // Không cho xóa chính mình
+    if (adminUser.id === parseInt(userId)) {
+      return res.status(400).json({ error: 'Cannot delete your own account' });
+    }
+    
+    const stmt = db.prepare('DELETE FROM users WHERE id = ?');
+    const info = stmt.run(userId);
+    
+    if (info.changes === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.json({ message: 'User deleted successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Cập nhật role người dùng (chỉ admin)
+app.put('/auth/users/:userId/role', (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { newRole, adminUsername, adminPassword } = req.body;
+    
+    if (!adminUsername || !adminPassword) {
+      return res.status(401).json({ error: 'Admin credentials required' });
+    }
+    
+    if (!newRole || !['user', 'admin'].includes(newRole)) {
+      return res.status(400).json({ error: 'Invalid role' });
+    }
+    
+    const hashPassword = (pwd) => {
+      const crypto = require('crypto');
+      return crypto.createHash('sha256').update(pwd).digest('hex');
+    };
+    
+    const adminHashedPassword = hashPassword(adminPassword);
+    const adminUser = db.prepare('SELECT id, role FROM users WHERE username = ? AND password = ? AND role = ?').get(adminUsername, adminHashedPassword, 'admin');
+    
+    if (!adminUser) {
+      return res.status(403).json({ error: 'Only admin can update roles' });
+    }
+    
+    const stmt = db.prepare('UPDATE users SET role = ? WHERE id = ?');
+    const info = stmt.run(newRole, userId);
+    
+    if (info.changes === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.json({ message: 'User role updated successfully' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Chỉnh sửa tài khoản (Admin có thể edit tất cả, User chỉ edit được password của mình)
+app.put('/auth/users/:userId/edit', (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { newUsername, newPassword, currentUsername, currentPassword } = req.body;
+    
+    if (!currentUsername || !currentPassword) {
+      return res.status(401).json({ error: 'Current credentials required' });
+    }
+    
+    if (!newUsername && !newPassword) {
+      return res.status(400).json({ error: 'Must provide new username or password' });
+    }
+    
+    const hashPassword = (pwd) => {
+      const crypto = require('crypto');
+      return crypto.createHash('sha256').update(pwd).digest('hex');
+    };
+    
+    const currentHashedPassword = hashPassword(currentPassword);
+    const currentUser = db.prepare('SELECT id, username, role FROM users WHERE username = ? AND password = ?').get(currentUsername, currentHashedPassword);
+    
+    if (!currentUser) {
+      return res.status(403).json({ error: 'Invalid credentials' });
+    }
+    
+    // Kiểm tra quyền: Admin có thể edit bất kỳ user nào, User chỉ edit được của mình
+    const targetUserId = parseInt(userId);
+    if (currentUser.role === 'user' && currentUser.id !== targetUserId) {
+      return res.status(403).json({ error: 'Users can only edit their own account' });
+    }
+    
+    // User không thể thay đổi username, chỉ password
+    if (currentUser.role === 'user' && newUsername && newUsername !== currentUser.username) {
+      return res.status(403).json({ error: 'Users cannot change username' });
+    }
+    
+    // Validate input
+    if (newUsername && newUsername.length < 3) {
+      return res.status(400).json({ error: 'Username must be at least 3 characters' });
+    }
+    
+    if (newPassword && newPassword.length < 6) {
+      return res.status(400).json({ error: 'Password must be at least 6 characters' });
+    }
+    
+    // Cập nhật tài khoản
+    let updateQuery = 'UPDATE users SET ';
+    let params = [];
+    
+    if (newUsername && newPassword) {
+      const newHashedPassword = hashPassword(newPassword);
+      updateQuery += 'username = ?, password = ? WHERE id = ?';
+      params = [newUsername, newHashedPassword, targetUserId];
+    } else if (newUsername) {
+      updateQuery += 'username = ? WHERE id = ?';
+      params = [newUsername, targetUserId];
+    } else {
+      const newHashedPassword = hashPassword(newPassword);
+      updateQuery += 'password = ? WHERE id = ?';
+      params = [newHashedPassword, targetUserId];
+    }
+    
+    const stmt = db.prepare(updateQuery);
+    const info = stmt.run(...params);
+    
+    if (info.changes === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    res.json({ message: 'Account updated successfully' });
+  } catch (err) {
+    if (err.message.includes('UNIQUE constraint failed')) {
+      return res.status(400).json({ error: 'Username already exists' });
+    }
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Đăng nhập
+app.post('/auth/login', (req, res) => {
+  try {
+    const { username, password } = req.body;
+    
+    if (!username || !password) {
+      return res.status(400).json({ error: 'Username and password are required' });
+    }
+    
+    // Simple hash
+    const hashPassword = (pwd) => {
+      const crypto = require('crypto');
+      return crypto.createHash('sha256').update(pwd).digest('hex');
+    };
+    
+    const hashedPassword = hashPassword(password);
+    
+    const stmt = db.prepare('SELECT id, username, role FROM users WHERE username = ? AND password = ?');
+    const user = stmt.get(username, hashedPassword);
+    
+    if (!user) {
+      return res.status(401).json({ error: 'Invalid username or password' });
+    }
+    
+    // Tạo token đơn giản (trong production nên dùng JWT)
+    const token = Buffer.from(`${user.id}:${user.username}:${Date.now()}`).toString('base64');
+    
+    res.json({ 
+      message: 'Login successful', 
+      token, 
+      user: { id: user.id, username: user.username, role: user.role } 
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // --- API Endpoints for Products ---

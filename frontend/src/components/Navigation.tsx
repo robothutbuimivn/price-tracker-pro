@@ -1,17 +1,18 @@
 import React from 'react';
 
-type PageType = 'check-price' | 'add-product' | 'price-history';
+type PageType = 'check-price' | 'add-product' | 'price-history' | 'account' | 'admin';
 
 interface NavigationProps {
   activePage: PageType;
   onPageChange: (page: PageType) => void;
+  isAdmin?: boolean;
 }
 
-export const Navigation: React.FC<NavigationProps> = ({ activePage, onPageChange }) => {
+export const Navigation: React.FC<NavigationProps> = ({ activePage, onPageChange, isAdmin }) => {
   return (
     <div className="bg-secondary border-b border-border shadow-md">
       <div className="container mx-auto px-4 md:px-8">
-        <div className="flex gap-4">
+        <div className="flex gap-4 flex-wrap">
           <button
             onClick={() => onPageChange('check-price')}
             className={`px-6 py-4 font-bold transition duration-300 border-b-2 ${
@@ -51,6 +52,34 @@ export const Navigation: React.FC<NavigationProps> = ({ activePage, onPageChange
             </svg>
             Lịch Sử Giá
           </button>
+          <button
+            onClick={() => onPageChange('account')}
+            className={`px-6 py-4 font-bold transition duration-300 border-b-2 ${
+              activePage === 'account'
+                ? 'border-accent text-accent'
+                : 'border-transparent text-muted hover:text-white'
+            }`}
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 inline mr-2" viewBox="0 0 20 20" fill="currentColor">
+              <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+            </svg>
+            Tài Khoản
+          </button>
+          {isAdmin && (
+            <button
+              onClick={() => onPageChange('admin')}
+              className={`px-6 py-4 font-bold transition duration-300 border-b-2 ${
+                activePage === 'admin'
+                  ? 'border-accent text-accent'
+                  : 'border-transparent text-muted hover:text-white'
+              }`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 inline mr-2" viewBox="0 0 20 20" fill="currentColor">
+                <path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7a1 1 0 001.414 1.414L4 10.414V17a1 1 0 001 1h2a1 1 0 001-1v-2a1 1 0 011-1h2a1 1 0 011 1v2a1 1 0 001 1h2a1 1 0 001-1v-6.586l.293.293a1 1 0 001.414-1.414l-7-7z" />
+              </svg>
+              Quản Lý Tài Khoản
+            </button>
+          )}
         </div>
       </div>
     </div>
