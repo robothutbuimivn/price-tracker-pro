@@ -12,19 +12,14 @@ export const getApiBaseUrl = (): string => {
     return 'http://localhost:8080';
   }
   
-  // For production, use relative path (proxy through same domain via Nginx)
-  return '';
+  // For production, use /api prefix (proxy through Nginx)
+  return '/api';
 };
 
 export const getApiUrl = (endpoint: string): string => {
   const baseUrl = getApiBaseUrl();
   const path = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
   
-  // If baseUrl is empty, just return the path (relative URL)
-  if (!baseUrl) {
-    return path;
-  }
-  
-  // Otherwise combine base URL with path
+  // Combine base URL with path
   return `${baseUrl}${path}`;
 };
