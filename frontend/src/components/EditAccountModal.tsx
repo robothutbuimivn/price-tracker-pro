@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getApiUrl } from '../utils/apiConfig';
 
 interface EditAccountModalProps {
   userId: number;
@@ -59,7 +60,7 @@ export const EditAccountModal: React.FC<EditAccountModalProps> = ({
 
     try {
       setIsLoading(true);
-      const response = await fetch(`http://localhost:8080/auth/users/${userId}/edit`, {
+      const response = await fetch(getApiUrl(`/auth/users/${userId}/edit`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

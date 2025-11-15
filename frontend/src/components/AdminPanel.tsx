@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { EditAccountModal } from './EditAccountModal';
+import { getApiUrl } from '../utils/apiConfig';
 
 interface User {
   id: number;
@@ -39,7 +40,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
       setIsLoading(true);
       setError('');
       const response = await fetch(
-        `http://localhost:8080/auth/users?adminUsername=${encodeURIComponent(adminUsername)}&adminPassword=${encodeURIComponent(adminPassword)}`
+        getApiUrl(`/auth/users?adminUsername=${encodeURIComponent(adminUsername)}&adminPassword=${encodeURIComponent(adminPassword)}`)
       );
       const data = await response.json();
 
@@ -66,7 +67,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     try {
       setIsCreating(true);
       setError('');
-      const response = await fetch('http://localhost:8080/auth/register', {
+      const response = await fetch(getApiUrl('/auth/register'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -101,7 +102,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
 
     try {
-      const response = await fetch(`http://localhost:8080/auth/users/${userId}`, {
+      const response = await fetch(getApiUrl(`/auth/users/${userId}`), {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ adminUsername, adminPassword }),
@@ -130,7 +131,7 @@ export const AdminPanel: React.FC<AdminPanelProps> = ({
     }
 
     try {
-      const response = await fetch(`http://localhost:8080/auth/users/${userId}/role`, {
+      const response = await fetch(getApiUrl(`/auth/users/${userId}/role`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ newRole, adminUsername, adminPassword }),

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { getApiUrl } from '../utils/apiConfig';
 
 interface LoginPageProps {
   onLoginSuccess: (token: string, username: string, role: string) => void;
@@ -16,7 +17,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onLoginSuccess }) => {
     setIsLoading(true);
 
     try {
-      const response = await fetch(`http://localhost:8080/auth/login`, {
+      const response = await fetch(getApiUrl('/auth/login'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
